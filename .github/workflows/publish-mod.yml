@@ -1,0 +1,30 @@
+name: Publish BlackHawk mod to launcher
+
+# Pushing a new mod/blackhawk-1.0.0.jar to the mod-upload branch publishes it to the
+# pack-current release: only the mods/blackhawk-1.0.0.jar entry of manifest.json changes,
+# the previous manifest stays in the release as manifest.previous-*.json for rollback.
+on:
+  push:
+    branches: [mod-upload]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-mod
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mod-upload
+      - name: Check the JAR against its checksum
+        run: cd mod && sha256sum -c blackhawk-1.0.0.jar.sha256
+      - name: Publish and verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/publish_mod.py mod/blackhawk-1.0.0.jar --repo "${{ github.repository }}" --publish
