@@ -11,7 +11,7 @@ Mirrors tools/publish-github.ps1 -ModOnly:
 Usage: python3 publish_mod_cloud.py JAR [--repo OWNER/REPO] [--publish]
 Without --publish nothing is changed (dry run).
 """
-import argparse, hashlib, json, os, secrets, subprocess, sys, tempfile, urllib.request
+import argparse, hashlib, json, os, secrets, subprocess, sys, tempfile, time, urllib.error, urllib.request
 
 ENTRY = 'mods/blackhawk-1.0.0.jar'
 TAG = 'pack-current'
@@ -41,6 +41,23 @@ def upload(repo, release_id, name, path):
 
 def rename(repo, asset_id, name):
     gh('api', '-X', 'PATCH', f'repos/{repo}/releases/assets/{asset_id}', '-f', f'name={name}', '--silent')
+
+
+def fetch(url, tries=6):
+    """Read a release download. GitHub's CDN serves 5xx for a while after a new asset
+    is promoted, so a failure here says nothing about the publish; keep asking."""
+    wait = 3
+    for attempt in range(1, tries + 1):
+        try:
+            return urllib.request.urlopen(url, timeout=120).read()
+        except Exception as problem:
+            code = getattr(problem, 'code', None)
+            fatal = code is not None and code not in (408, 425, 429) and code < 500
+            if fatal or attempt == tries:
+                raise
+            print(f'  read-back {url.rsplit("/", 1)[-1]} failed ({problem}); retry {attempt}/{tries - 1} in {wait}s')
+            time.sleep(wait)
+            wait = min(wait * 2, 30)
 
 
 def sha(b):
@@ -123,9 +140,9 @@ def main():
     if man.get('digest') != 'sha256:' + new_sha:
         raise SystemExit('Published manifest digest could not be verified.')
     base = f'https://github.com/{o.repo}/releases/download/{TAG}/'
-    got = json.loads(urllib.request.urlopen(base + 'manifest.json').read())
+    got = json.loads(fetch(base + 'manifest.json'))
     e = [f for f in got['files'] if f['path'] == ENTRY][0]
-    remote = urllib.request.urlopen(base + name).read()
+    remote = fetch(base + name)
     assert e['sha256'] == jar_sha == sha(remote) and len(remote) == len(jar), 'public download mismatch'
     print('Previous manifest preserved as:', backup)
     print('Published and verified:', base + 'manifest.json')
